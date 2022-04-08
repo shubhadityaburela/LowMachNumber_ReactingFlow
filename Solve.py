@@ -1,6 +1,5 @@
 import RungeKutta
 import MakeDivFree
-import Filter
 
 import numpy as np
 from scipy.sparse import diags
@@ -27,9 +26,9 @@ class CalcSolver:
             values_1, fluxes, rhs, errs = self.timeStepGeneral(values_n, params, refVar, numbers_ND, grid,
                                                                coefficient_mats)
             values_n = values_1
-            values_1 = ReDimensionalize(values_1, refVar)
-
             self.output_var.append(values_1)
+
+        self.output_var = ReDimensionalize(self.output_var, refVar, self.tp['TimeSteps'])
 
         print("\n")
         print("############Solver calculation end###############")
@@ -41,24 +40,6 @@ class CalcSolver:
         rhs = np.zeros((self.gp['Nxi'], self.gp['Neta'], self.ep['number'], stages), dtype=float)
         fluxes = 'dummy'
 
-        fractionalStep = self.ep['FractionalStep']
-        filterOldStep = self.tp['filterOldStep']
-        filterRHS = self.tp['filterRHS']
-        onlyPressureGradient = self.ep['onlyPressureGradient']
-
-        if fractionalStep:
-            for kStep in range(stages):
-                if onlyPressureGradient:
-                    raise NotImplemented("onlyPressureGradient not implemented. Will not be used ")
-                    rhs[:, :, 3, kStep] = values_n[:, :, 3]
-                    rhs[:, :, 5, kStep] = values_n[:, :, 5]
-                else:
-                    rhs[:, :, 3, kStep] = values_n[:, :, 3]
-
-        if filterOldStep:
-            f = Filter.Filter(self.fp, self.gp, self.ep)
-            values_n = f.filterWrapper(values_n)
-
         # To check convergence if implicit scheme
         values_1_old = values_n
         values_1 = values_n  # Just to allocate
@@ -67,16 +48,17 @@ class CalcSolver:
         for j in range(self.tp['FixPointIter']):
             for kStep in range(stages):
                 rhs, fluxes = self.__iterStep(values_n, rhs, fluxes, kStep, scheme, params, numbers_ND,
-                                              coefficient_mats)
+                                              coefficient_mats, grid)
 
             values_1 = values_n
             for kStep in range(stages):
-                if filterRHS:
-                    print('error please move outside')
-                    rhs[:, :, :, kStep] = f.filterWrapper(rhs[:, :, :, kStep])
                 values_1 = values_1 + self.tp['dt'] * scheme.b[kStep] * rhs[:, :, :, kStep]
 
-            values_1[:, :, 3] = rhs[:, :, 3, 0]
+            # Correct the velocities
+            values_1, divUOld, divUNew, p_project, _, _ = MakeDivFree.makeDivergenceFree(params, numbers_ND,
+                                                                                         coefficient_mats, values_1)
+            values_1[:, :, 3] = p_project
+            values_1[:, :, 4] = (refVar['P_th'] / refVar['p_ref']) / values_1[:, :, 0]
 
             if not scheme.implicit:
                 print('explicit scheme do not require iterations')
@@ -97,16 +79,6 @@ class CalcSolver:
 
             values_1_old = values_1
 
-        # Calculate fractional step if needed
-        if fractionalStep:
-            if onlyPressureGradient:
-                raise NotImplemented("onlyPressureGradient not implemented. Will not be used ")
-            else:
-                values_1, divUOld, divUNew, p_project = MakeDivFree.makeDivergenceFree(params, numbers_ND,
-                                                                                       coefficient_mats, values_1)
-                values_1[:, :, 3] = values_n[:, :, 3] + p_project / self.tp['dt']
-                values_1[:, :, 4] = values_n[:, :, 4] + (refVar['P_th'] / refVar['p_ref']) / values_1[:, :, 0] / self.tp['dt']
-
         if not scheme.implicit:
             converged = True
             errTotal = 0
@@ -115,9 +87,11 @@ class CalcSolver:
 
         return values_1, fluxes, rhs, errTotal
 
-    def __iterStep(self, values_n, rhs, fluxes, kStep, scheme, params, numbers_ND, coefficient_mats):
+    def __iterStep(self, values_n, rhs, fluxes, kStep, scheme, params, numbers_ND, coefficient_mats, grid):
 
-        values_sub = self.__get_values_substep(values_n[:, :, 0:3], rhs[:, :, 0:3, :], kStep, scheme)[0]
+        values_sub = self.__get_values_substep(values_n[:, :, 0:5], rhs[:, :, 0:5, :], kStep, scheme)[0]
+        values_sub, divUOld, divUNew, p_project, p_x, p_y = MakeDivFree.makeDivergenceFree(params, numbers_ND,
+                                                                                           coefficient_mats, values_sub)
 
         NN = self.gp['Nxi'] * self.gp['Neta']
         rho_sub = np.reshape(values_sub[:, :, 0], newshape=NN, order="F")
@@ -136,27 +110,14 @@ class CalcSolver:
 
         rhs_rho = - coefficient_mats.Div_Xi_kron.dot(rho_sub * u_sub) - coefficient_mats.Div_Eta_kron.dot(
             rho_sub * v_sub)
-        rhs_u_woP = - (Du.dot(u_sub) )#- fric_U) #+ 1 / numbers_ND['Fr'] ** 2
-        rhs_v_woP = - (Du.dot(v_sub) )#- fric_V) #+ 1 / numbers_ND['Fr'] ** 2
-
-        fractionalStep = self.ep['FractionalStep']
-        if fractionalStep:
-            p_sub = np.reshape(rhs[:, :, 3, kStep], newshape=NN, order="F")
-            p_x = coefficient_mats.Grad_Xi_kron * p_sub
-            p_y = coefficient_mats.Grad_Eta_kron * p_sub
-            p_x = np.reshape(p_x, newshape=[self.gp['Nxi'], self.gp['Neta']], order="F")
-            p_y = np.reshape(p_y, newshape=[self.gp['Nxi'], self.gp['Neta']], order="F")
-        else:
-            pass
-            # rhs_u_woP_reshape = np.reshape(rhs_u_woP, newshape=[self.gp['Nxi'], self.gp['Neta']], order="F")
-            # rhs_v_woP_reshape = np.reshape(rhs_v_woP, newshape=[self.gp['Nxi'], self.gp['Neta']], order="F")
-            # p_x, p_y, divU, p_sub = MakeDivFree.calcGradP(params, coefficient_mats, u_sub, v_sub, rho_sub, Q)
-
-        ## Every fixed point iteration step should be divergence free
+        rhs_u_woP = - (Du.dot(u_sub) - fric_U) #+ 1 / numbers_ND['Fr'] ** 2
+        rhs_v_woP = - (Du.dot(v_sub) - fric_V) #+ 1 / numbers_ND['Fr'] ** 2
 
         rhs_rho = np.reshape(rhs_rho, newshape=[self.gp['Nxi'], self.gp['Neta']], order="F")
-        rhs_u = np.reshape(rhs_u_woP, newshape=[self.gp['Nxi'], self.gp['Neta']], order="F") #- p_x
-        rhs_v = np.reshape(rhs_v_woP, newshape=[self.gp['Nxi'], self.gp['Neta']], order="F") #- p_y
+        rhs_u = np.reshape(rhs_u_woP, newshape=[self.gp['Nxi'], self.gp['Neta']],
+                           order="F") - p_x / values_sub[:, :, 0]
+        rhs_v = np.reshape(rhs_v_woP, newshape=[self.gp['Nxi'], self.gp['Neta']],
+                           order="F") - p_y / values_sub[:, :, 0]
 
         rhs[:, :, 0, kStep] = rhs_rho
         rhs[:, :, 1, kStep] = rhs_u
@@ -171,17 +132,24 @@ class CalcSolver:
         values_sub = values_n
 
         for j in range(stageNo):
-            values_sub = values_sub + (self.tp['dt'] * a[kStep, j]) * rhs[:, :, :, j]
+            values_sub = values_sub + (self.tp['dt'] * a[kStep, j] if a.ndim > 1 else a[j]) * rhs[:, :, :, j]
 
         t_sub = c[kStep] * self.tp['dt']
 
         return values_sub, t_sub
 
 
-def ReDimensionalize(values_1, refVar):
-    values_1[:, :, 0] = values_1[:, :, 0] * refVar['rho_ref']
-    values_1[:, :, 1] = values_1[:, :, 1] * refVar['u_ref']
-    values_1[:, :, 2] = values_1[:, :, 2] * refVar['v_ref']
-    values_1[:, :, 3] = values_1[:, :, 3] * refVar['p_ref']
+def ReDimensionalize(output_var, refVar, TimeSteps):
+    for ts in range(TimeSteps):
+        x = output_var[ts][:, :, 0] * refVar['rho_ref']
+        output_var[ts][:, :, 0] = x
+        x = output_var[ts][:, :, 1] * refVar['u_ref']
+        output_var[ts][:, :, 1] = x
+        x = output_var[ts][:, :, 2] * refVar['v_ref']
+        output_var[ts][:, :, 2] = x
+        x = output_var[ts][:, :, 3] * refVar['p_ref']
+        output_var[ts][:, :, 3] = x
+        x = output_var[ts][:, :, 4] * refVar['T_ref']
+        output_var[ts][:, :, 4] = x
 
-    return values_1
+    return output_var

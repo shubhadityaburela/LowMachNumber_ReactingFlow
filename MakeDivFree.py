@@ -13,7 +13,6 @@ def makeDivergenceFree(params, numbers_ND, coefficient_mats, prim_var):
     NN = params['Geometry Parameters']['Nxi'] * params['Geometry Parameters']['Neta']
     rho_sub = np.reshape(rho, newshape=NN, order="F")
     Q = (1 / (numbers_ND['Pr'] * numbers_ND['Re'])) * coefficient_mats.LaplaceEnergy.dot(np.reciprocal(rho_sub))
-
     p_x, p_y, divUOld, p_project = calcGradP(params, coefficient_mats, u_aux, v_aux, rho, Q)
 
     if not params['Geometry Parameters']['XI_Periodic']:
@@ -36,7 +35,7 @@ def makeDivergenceFree(params, numbers_ND, coefficient_mats, prim_var):
 
     divUNew = coefficient_mats.Div_Xi * u + v * coefficient_mats.Div_Eta.transpose()
 
-    return prim_var, divUOld, divUNew, p_project
+    return prim_var, divUOld, divUNew, p_project, p_x, p_y
 
 
 def calcGradP(params, coefficient_mats, u_aux, v_aux, rho, Q):

@@ -11,6 +11,8 @@ class GridPar:
         self.ETA = None
         self.X = None
         self.Y = None
+        self.XI_Vec = None
+        self.ETA_Vec = None
 
 
 def CartesianGrid(params, refVar):
@@ -42,6 +44,8 @@ def CartesianGrid(params, refVar):
     grid_par.dXi = dXi
     grid_par.dEta = dEta
 
+    grid_par.XI_Vec = Xi
+    grid_par.ETA_Vec = Eta
     # Create the mesh grid for future
     XI, ETA = np.meshgrid(Xi, Eta)
     # We want to have Xi changing in the first index and Eta changing in the second index

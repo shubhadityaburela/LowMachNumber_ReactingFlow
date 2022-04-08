@@ -2,12 +2,14 @@ import sys
 import warnings
 
 from matplotlib import pyplot as plt
+from matplotlib import cm
+from scipy.stats import multivariate_normal
 
 import Grid
 import ND_num
 import CoeffMat
-import MakeDivFree
 import plot
+import MakeDivFree
 from Solve import CalcSolver
 
 from scipy.sparse import linalg
@@ -85,29 +87,36 @@ if __name__ == '__main__':
                    'number': 5,  # Number of individual equations to be solved in the 2d incompressible NS equations
                    'initPressureSolver': 'directLU_Init',  # Initialize the pressure solver with appropriate method
                    'onlyPressureGradient': False,  # Calculate the pressure gradient for adjoint calculations
-                   'PressureCalcMethod': 'LULaplace', # Options : 'backslashLaplace', 'backslashLaplaceNeumann', 'LULaplace', 'FFT'
+                   'PressureCalcMethod': 'LULaplace',
+                   # Options : 'backslashLaplace', 'backslashLaplaceNeumann', 'LULaplace', 'FFT'
                    'FractionalStep': False,  # Whether to perform fractional step for pressure calculation
                    'makeDivergenceFree': True  # Whether to make the problem divergence free
                    },
               'Derivative Parameters':
-                  {'name': '5thOrder',# Derivative order for equations. Options : '1stOrder', '2ndOrder', '3rdOrder', '3rdOrderMixed', '5thOrder', '7thOrder', 'secondSymmetric'
-                   'FrictionLaplace': 'explicit7Point',# Method to calculate the Friction laplace matrix. Options : 'DivGrad', 'explicit7Point'
+                  {'name': '5thOrder',
+                   # Derivative order for equations. Options : '1stOrder', '2ndOrder', '3rdOrder', '3rdOrderMixed', '5thOrder', '7thOrder', 'secondSymmetric'
+                   'FrictionLaplace': 'explicit7Point',
+                   # Method to calculate the Friction laplace matrix. Options : 'DivGrad', 'explicit7Point'
                    'MixFactor': 0.5,  # Mix factor for the '3rdOrderMixed' derivative order case
-                   'KroneckerForm': True, # Variable to define whether the kronecker forms of the coefficient matrices are required
-                   'ExplicitFriction': None # This creates explicit friction matrices for the problem. Options : '8thOrder', None
+                   'KroneckerForm': True,
+                   # Variable to define whether the kronecker forms of the coefficient matrices are required
+                   'ExplicitFriction': None
+                   # This creates explicit friction matrices for the problem. Options : '8thOrder', None
                    },
               'Time Parameters':
-                  {'TimeScheme': 'gauss4', # Scheme for the Time integration. Options : 'gauss2', 'gauss4', 'gauss6', 'classicRK4', 'EulerExplicit'
-                   'TimeSteps': 200,  # Time steps for the Time integration
+                  {'TimeScheme': 'classicRK4',
+                   # Scheme for the Time integration. Options : 'gauss2', 'gauss4', 'gauss6', 'classicRK4', 'EulerExplicit'
+                   'TimeSteps': 100,  # Time steps for the Time integration
                    'dt': 0.005,  # Time step size
                    'FixPointIter': 60,  # Number of fixed point iterations for the implicit schemes
-                   'FixPointIterErr': 1e-13,  # The convergence condition for the fixed point iteration
+                   'FixPointIterErr': 1e-5,  # The convergence condition for the fixed point iteration
                    'filterOldStep': False,
                    'filterRHS': False
                    },
               'Filter Parameters':
                   {'filtering': False,  # Choose whether to apply the filtering
-                   'name': 'padeFilter',# Name of the filter. Options : 'padeFilterConservative', 'padeFilter', 'padeFilterPrimitive'
+                   'name': 'padeFilter',
+                   # Name of the filter. Options : 'padeFilterConservative', 'padeFilter', 'padeFilterPrimitive'
                    'Type': 'non-per',  # Type of the filter. Options : 'non-per', 'per'
                    'order': 2,  # Order of the filter. Options : 2, 4, 6
                    'alpha': 0.35  # Filter factor
@@ -126,9 +135,9 @@ if __name__ == '__main__':
         'T_ref': 300,
         'gamma': 1.399,
         'mu': 18e-6,
-        'g': 10,
+        'g': 9.81,
         'Cv': 718,
-        'K': 25e-3,
+        'K': 500e-3,
         'P_th': 2e5
     }
     # Introduce dimensionless numbers
@@ -152,7 +161,6 @@ if __name__ == '__main__':
         alphas = np.array([10, -10])  # Strength
 
         rho = 1.5  # Initial density
-        T = 400  # Initial temperature
         omegaShift = True
         omegaShiftValue = None
         LaplaceInvert = 'LULaplace'
@@ -227,10 +235,19 @@ if __name__ == '__main__':
             u = - np.reshape(Psi_y, newshape=[Nxi, Neta], order="F")
             v = np.reshape(Psi_x, newshape=[Nxi, Neta], order="F")
 
-        prim_var[:, :, 0] = rho
+        mu_x = 0.5
+        variance_x = 0.008
+        mu_y = 0.5
+        variance_y = 0.008
+        pos = np.empty(grid.X.shape + (2,))
+        pos[:, :, 0] = grid.X
+        pos[:, :, 1] = grid.Y
+        rv = multivariate_normal([mu_x, mu_y], [[variance_x, 0], [0, variance_y]])
+
+        prim_var[:, :, 0] = rho + (np.max(rv.pdf(pos)) - rv.pdf(pos)) / (np.max(rv.pdf(pos)) - np.min(rv.pdf(pos)))
         prim_var[:, :, 1] = u.todense()
         prim_var[:, :, 2] = v.todense()
-        prim_var[:, :, 4] = T
+        prim_var[:, :, 4] = ((refVar['P_th'] / refVar['p_ref']) / (prim_var[:, :, 0] / refVar['rho_ref'])) * refVar['T_ref']
     elif case == 'taylorGreen':
         raise NotImplemented("taylorGreen not implemented")
     elif case == 'shearLayer':
@@ -238,13 +255,14 @@ if __name__ == '__main__':
     else:
         raise NotImplemented("Please select the appropriate Initial Model for the problem from the list")
 
-    # Make the input values divergence free
+    # Make the input values Numerically divergence free
     if params['Equation Parameters']['makeDivergenceFree']:
-        prim_var, DivergenceOld, DivergenceNew, _ = MakeDivFree.makeDivergenceFree(params, numbers_ND,
-                                                                                   coefficient_mats, prim_var)
+        prim_var, DivergenceOld, DivergenceNew, _, _, _ = MakeDivFree.makeDivergenceFree(params, numbers_ND,
+                                                                                         coefficient_mats, prim_var)
+        print(np.linalg.norm(DivergenceOld), np.linalg.norm(DivergenceNew))
         if np.linalg.norm(DivergenceNew) > 1e-12:
-            print("The initial condition did not end up to be divergence free. Please check the code")
-            exit()
+            print("The initial condition did not end up to be divergence free. "
+                  "Please be aware that either there is some inconsistency or the initial density is non-uniform")
     else:
         warnings.warn("You have selected the inputs to be not divergence free. Please re-think")
         exit()
@@ -254,10 +272,26 @@ if __name__ == '__main__':
     prim_var[:, :, 1] = prim_var[:, :, 1] / refVar['u_ref']  # u
     prim_var[:, :, 2] = prim_var[:, :, 2] / refVar['v_ref']  # v
     prim_var[:, :, 3] = prim_var[:, :, 3] / refVar['p_ref']  # p
-    prim_var[:, :, 4] = prim_var[:, :, 3] / refVar['T_ref']  # T
+    prim_var[:, :, 4] = prim_var[:, :, 4] / refVar['T_ref']  # T
 
-    # plt.contourf(grid.X, grid.Y, prim_var[:, :, 0])
+    # plt.contourf(grid.X, grid.Y, prim_var[:, :, 3])
     # plt.show()
+
+    # fig = plt.figure()
+    # ax = plt.axes(projection='3d')
+    # ax.contour3D(grid.X, grid.Y, prim_var[:, :, 1], 50, cmap='binary')
+    # ax.set_xlabel('x')
+    # ax.set_ylabel('y')
+    # ax.set_zlabel('rho')
+    # ax.set_title('3D contour')
+    # plt.show()
+
+    # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    # surf = ax.plot_surface(grid.X, grid.Y, prim_var[:, :, 0], cmap=cm.coolwarm, linewidth=0, antialiased=False)
+    # fig.colorbar(surf, shrink=0.5, aspect=5)
+    # plt.show()
+    #
+    # sys.exit()
 
     # Run the solver
     switch = True
@@ -270,10 +304,4 @@ if __name__ == '__main__':
         if result is None:
             print('Solution of the primary variables not computed. Please compute it first')
             exit()
-        # plot.plot(params, grid, result, var_name='rho')
-        plot.show_animation(result[0][:, :, 0])
-
-
-
-
-
+        plot.plot(params, grid, result, var_name='rho', type_plot='Quiver')

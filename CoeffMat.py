@@ -148,7 +148,7 @@ class CoeffMat:
             self.ExpFric_Xi = M.D_periodic(self.__ExpFrictn, Nxi, dXi ** 2)
             self.ExpFric_Eta = M.D_periodic(self.__ExpFrictn, Neta, dEta ** 2)
         elif self.dp['ExplicitFriction'] is None:
-            warnings.warn("Explicit Friction is set to None.")
+            # warnings.warn("Explicit Friction is set to None.")
             pass
         else:
             raise NotImplemented(
