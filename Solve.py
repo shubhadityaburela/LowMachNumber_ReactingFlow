@@ -90,8 +90,6 @@ class CalcSolver:
     def __iterStep(self, values_n, rhs, fluxes, kStep, scheme, params, numbers_ND, coefficient_mats, grid):
 
         values_sub = self.__get_values_substep(values_n[:, :, 0:5], rhs[:, :, 0:5, :], kStep, scheme)[0]
-        values_sub, divUOld, divUNew, p_project, p_x, p_y = MakeDivFree.makeDivergenceFree(params, numbers_ND,
-                                                                                           coefficient_mats, values_sub)
 
         NN = self.gp['Nxi'] * self.gp['Neta']
         rho_sub = np.reshape(values_sub[:, :, 0], newshape=NN, order="F")
@@ -110,15 +108,17 @@ class CalcSolver:
 
         rhs_rho = - coefficient_mats.Div_Xi_kron.dot(rho_sub * u_sub) - coefficient_mats.Div_Eta_kron.dot(
             rho_sub * v_sub)
-        rhs_u_woP = - (Du.dot(u_sub) - fric_U) #+ 1 / numbers_ND['Fr'] ** 2
-        rhs_v_woP = - (Du.dot(v_sub) - fric_V) #+ 1 / numbers_ND['Fr'] ** 2
+        rhs_u_woP = - (Du.dot(u_sub) - fric_U)  # + 1 / numbers_ND['Fr'] ** 2
+        rhs_v_woP = - (Du.dot(v_sub) - fric_V)  # + 1 / numbers_ND['Fr'] ** 2
 
         rhs_rho = np.reshape(rhs_rho, newshape=[self.gp['Nxi'], self.gp['Neta']], order="F")
-        rhs_u = np.reshape(rhs_u_woP, newshape=[self.gp['Nxi'], self.gp['Neta']],
-                           order="F") - p_x / values_sub[:, :, 0]
-        rhs_v = np.reshape(rhs_v_woP, newshape=[self.gp['Nxi'], self.gp['Neta']],
-                           order="F") - p_y / values_sub[:, :, 0]
+        rhs_u_woP = np.reshape(rhs_u_woP, newshape=[self.gp['Nxi'], self.gp['Neta']], order="F")
+        rhs_v_woP = np.reshape(rhs_v_woP, newshape=[self.gp['Nxi'], self.gp['Neta']], order="F")
 
+        rhs_u, rhs_v, divRHSOld, divRHSNew = MakeDivFree.makeDivergenceFreeRHS(params, numbers_ND,
+                                                                               coefficient_mats,
+                                                                               values_sub, rhs_u_woP,
+                                                                               rhs_v_woP)
         rhs[:, :, 0, kStep] = rhs_rho
         rhs[:, :, 1, kStep] = rhs_u
         rhs[:, :, 2, kStep] = rhs_v

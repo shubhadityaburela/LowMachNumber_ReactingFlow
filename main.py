@@ -137,7 +137,7 @@ if __name__ == '__main__':
         'mu': 18e-6,
         'g': 9.81,
         'Cv': 718,
-        'K': 500e-3,
+        'K': 25e-3,
         'P_th': 2e5
     }
     # Introduce dimensionless numbers
@@ -244,7 +244,7 @@ if __name__ == '__main__':
         pos[:, :, 1] = grid.Y
         rv = multivariate_normal([mu_x, mu_y], [[variance_x, 0], [0, variance_y]])
 
-        prim_var[:, :, 0] = rho + (np.max(rv.pdf(pos)) - rv.pdf(pos)) / (np.max(rv.pdf(pos)) - np.min(rv.pdf(pos)))
+        prim_var[:, :, 0] = rho #+ (np.max(rv.pdf(pos)) - rv.pdf(pos)) / (np.max(rv.pdf(pos)) - np.min(rv.pdf(pos)))
         prim_var[:, :, 1] = u.todense()
         prim_var[:, :, 2] = v.todense()
         prim_var[:, :, 4] = ((refVar['P_th'] / refVar['p_ref']) / (prim_var[:, :, 0] / refVar['rho_ref'])) * refVar['T_ref']
@@ -294,7 +294,7 @@ if __name__ == '__main__':
     # sys.exit()
 
     # Run the solver
-    switch = True
+    switch = False
     if switch:
         result = CalcSolver(params, refVar, numbers_ND, grid, coefficient_mats, prim_var)
         np.save('prim_var.npy', result.output_var)
@@ -304,4 +304,4 @@ if __name__ == '__main__':
         if result is None:
             print('Solution of the primary variables not computed. Please compute it first')
             exit()
-        plot.plot(params, grid, result, var_name='rho', type_plot='Quiver')
+        plot.plot(params, grid, result, var_name='v', type_plot='Quiver')

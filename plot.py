@@ -97,5 +97,5 @@ def plot(params, grid, prim_var, var_name='u', type_plot='2D'):
             tx.set_text('Time step {0}'.format(i))
 
     ani = animation.FuncAnimation(fig, animate, frames=params['Time Parameters']['TimeSteps'],
-                                  interval=75, blit=False, repeat=False)
+                                  interval=1, blit=False, repeat=False)
     plt.show()
