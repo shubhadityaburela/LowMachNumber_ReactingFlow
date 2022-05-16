@@ -3,16 +3,49 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse import diags
 from scipy.sparse import linalg
+import sys
+from scipy.stats import multivariate_normal
+import matplotlib.pyplot as plt
+from matplotlib import cm
 
 
-def makeDivergenceFree(params, numbers_ND, coefficient_mats, prim_var):
+def heat_source(grid):
+    mu_x = 0.5
+    variance_x = 0.008
+    mu_y = 0.5
+    variance_y = 0.008
+    pos = np.empty(grid.X.shape + (2,))
+    pos[:, :, 0] = grid.X
+    pos[:, :, 1] = grid.Y
+    rv = multivariate_normal([mu_x, mu_y], [[variance_x, 0], [0, variance_y]])
+    profile = 1 + (np.max(rv.pdf(pos)) - rv.pdf(pos)) / (np.max(rv.pdf(pos)) - np.min(rv.pdf(pos)))
+
+    return 1 / profile
+
+
+def makeDivergenceFree(params, numbers_ND, coefficient_mats, prim_var, refVar, grid):
     rho = prim_var[:, :, 0]
     u_aux = prim_var[:, :, 1]
     v_aux = prim_var[:, :, 2]
+    Y = prim_var[:, :, 5]
+    omegaDot = prim_var[:, :, 6]
 
     NN = params['Geometry Parameters']['Nxi'] * params['Geometry Parameters']['Neta']
     rho_sub = np.reshape(rho, newshape=NN, order="F")
-    Q = (1 / (numbers_ND['Pr'] * numbers_ND['Re'])) * coefficient_mats.LaplaceEnergy.dot(np.reciprocal(rho_sub))
+    omegaDot_sub = np.reshape(omegaDot, newshape=NN, order="F")
+
+    Q_th = (1 / (numbers_ND['Pr'] * numbers_ND['Re'])) * coefficient_mats.LaplaceEnergy.dot(np.reciprocal(rho_sub))
+    Q_r = refVar['h_0'] * omegaDot_sub / (refVar['gamma'] * refVar['P_th'] / refVar['p_ref'])
+    # Q_h = 0.0005 / (refVar['gamma'] * refVar['P_th'] / refVar['p_ref']) * heat_source(grid)
+    Q = Q_th + Q_r #+ np.reshape(Q_h, newshape=NN, order="F")
+
+    # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    # surf = ax.plot_surface(grid.X, grid.Y, Q_h, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+    # fig.colorbar(surf, shrink=0.5, aspect=5)
+    # plt.show()
+    #
+    # sys.exit()
+
     p_x, p_y, divUOld, p_project = calcGradP(params, coefficient_mats, u_aux, v_aux, rho, Q)
 
     if not params['Geometry Parameters']['XI_Periodic']:
@@ -38,12 +71,19 @@ def makeDivergenceFree(params, numbers_ND, coefficient_mats, prim_var):
     return prim_var, divUOld, divUNew, p_project, p_x, p_y
 
 
-def makeDivergenceFreeRHS(params, numbers_ND, coefficient_mats, prim_var, rhs_u_wop, rhs_v_wop):
+def makeDivergenceFreeRHS(params, numbers_ND, coefficient_mats, prim_var, rhs_u_wop, rhs_v_wop, refVar, grid):
     rho = prim_var[:, :, 0]
+    omegaDot = prim_var[:, :, 6]
 
     NN = params['Geometry Parameters']['Nxi'] * params['Geometry Parameters']['Neta']
     rho_sub = np.reshape(rho, newshape=NN, order="F")
-    Q = (1 / (numbers_ND['Pr'] * numbers_ND['Re'])) * coefficient_mats.LaplaceEnergy.dot(np.reciprocal(rho_sub))
+    omegaDot_sub = np.reshape(omegaDot, newshape=NN, order="F")
+
+    Q_th = (1 / (numbers_ND['Pr'] * numbers_ND['Re'])) * coefficient_mats.LaplaceEnergy.dot(np.reciprocal(rho_sub))
+    Q_r = refVar['h_0'] * omegaDot_sub / (refVar['gamma'] * refVar['P_th'] / refVar['p_ref'])
+    # Q_h = 0.0005 / (refVar['gamma'] * refVar['P_th'] / refVar['p_ref']) * heat_source(grid)
+    Q = Q_th + Q_r #+ np.reshape(Q_h, newshape=NN, order="F")
+
     p_x, p_y, divRHSOld, p_project = calcGradPRHS(params, coefficient_mats, rhs_u_wop, rhs_v_wop, rho, Q)
 
     if not params['Geometry Parameters']['XI_Periodic']:

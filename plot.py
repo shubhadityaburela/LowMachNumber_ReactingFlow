@@ -18,6 +18,10 @@ def plot(params, grid, prim_var, var_name='u', type_plot='2D'):
         k = 3
     elif var_name == 'T':
         k = 4
+    elif var_name == 'Y':
+        k = 5
+    elif var_name == 'O':
+        k = 6
     else:
         k = 1
 

@@ -10,6 +10,7 @@ import ND_num
 import CoeffMat
 import plot
 import MakeDivFree
+import Chemistry
 from Solve import CalcSolver
 
 from scipy.sparse import linalg
@@ -65,8 +66,8 @@ Our Model:
 if __name__ == '__main__':
     # Input parameters
     params = {'Geometry Parameters':
-                  {'Nxi': 48,  # X and Y grid points
-                   'Neta': 49,
+                  {'Nxi': 5,  # X and Y grid points
+                   'Neta': 4,
                    'Lxi': 1,  # Lengths of the domain in the X and Y direction
                    'Leta': 1,
                    'X_Xi': 1,  # Derivative of the cartesian coordinates with respect to computational coordinates
@@ -84,7 +85,7 @@ if __name__ == '__main__':
                    },
               'Equation Parameters':
                   {'iterStep': 'iterStepSkew',  # Type of solver for the iteration step
-                   'number': 5,  # Number of individual equations to be solved in the 2d incompressible NS equations
+                   'number': 7,  # Number of individual equations to be solved in the 2d incompressible NS equations
                    'initPressureSolver': 'directLU_Init',  # Initialize the pressure solver with appropriate method
                    'onlyPressureGradient': False,  # Calculate the pressure gradient for adjoint calculations
                    'PressureCalcMethod': 'LULaplace',
@@ -106,7 +107,7 @@ if __name__ == '__main__':
               'Time Parameters':
                   {'TimeScheme': 'classicRK4',
                    # Scheme for the Time integration. Options : 'gauss2', 'gauss4', 'gauss6', 'classicRK4', 'EulerExplicit'
-                   'TimeSteps': 100,  # Time steps for the Time integration
+                   'TimeSteps': 10,  # Time steps for the Time integration
                    'dt': 0.005,  # Time step size
                    'FixPointIter': 60,  # Number of fixed point iterations for the implicit schemes
                    'FixPointIterErr': 1e-5,  # The convergence condition for the fixed point iteration
@@ -130,15 +131,22 @@ if __name__ == '__main__':
         'u_ref': 1,
         'v_ref': 1,
         't_ref': 1,
-        'rho_ref': 1.2,
+        'rho_ref': 1.1839,
         'p_ref': 1e5,
-        'T_ref': 300,
+        'T_ref': 298,
         'gamma': 1.399,
         'mu': 18e-6,
         'g': 9.81,
         'Cv': 718,
+        'R': 287,
         'K': 25e-3,
-        'P_th': 2e5
+        'P_th': 1e5,
+        'h_0': 39.0 * 287 * 298 / 0.027,
+        'D_0': 6.25e-7,
+        'n': 0.7,
+        'omegaDot_ref': 1e5,
+        'mass_frac_ref': 1,
+        'V_ref': 1
     }
     # Introduce dimensionless numbers
     numbers_ND = ND_num.num_ND(refVar)
@@ -152,7 +160,8 @@ if __name__ == '__main__':
     # Input model
     prim_var = np.zeros((params['Geometry Parameters']['Nxi'], params['Geometry Parameters']['Neta'],
                          params['Equation Parameters']['number']), dtype=float)
-    case = 'vortices'
+
+    case = 'vehicleTunnel'
     if case == 'vortices':
         # Vortex positions (x) and (y)
         x0s = np.array([1 / 2, 1 / 2])
@@ -160,7 +169,9 @@ if __name__ == '__main__':
         betas = np.array([1 / 14, 1 / 14])  # Vortex core size
         alphas = np.array([10, -10])  # Strength
 
-        rho = 1.5  # Initial density
+        rho = 1.1839  # Initial density
+        T_in = 298  # Initial temperature
+        Y = 1.0  # Initial Mass fraction of the fuel
         omegaShift = True
         omegaShiftValue = None
         LaplaceInvert = 'LULaplace'
@@ -244,37 +255,58 @@ if __name__ == '__main__':
         pos[:, :, 1] = grid.Y
         rv = multivariate_normal([mu_x, mu_y], [[variance_x, 0], [0, variance_y]])
 
-        prim_var[:, :, 0] = rho #+ (np.max(rv.pdf(pos)) - rv.pdf(pos)) / (np.max(rv.pdf(pos)) - np.min(rv.pdf(pos)))
+        prim_var[:, :, 0] = rho  # + (np.max(rv.pdf(pos)) - rv.pdf(pos)) / (np.max(rv.pdf(pos)) - np.min(rv.pdf(pos)))
         prim_var[:, :, 1] = u.todense()
         prim_var[:, :, 2] = v.todense()
-        prim_var[:, :, 4] = ((refVar['P_th'] / refVar['p_ref']) / (prim_var[:, :, 0] / refVar['rho_ref'])) * refVar['T_ref']
+        prim_var[:, :, 4] = refVar['T_ref'] * refVar['rho_ref'] * refVar['P_th'] / (prim_var[:, :, 0] * refVar['p_ref'])
+        prim_var[:, :, 5] = prim_var[:, :, 0] * Y  # rho * Y
+
     elif case == 'taylorGreen':
         raise NotImplemented("taylorGreen not implemented")
     elif case == 'shearLayer':
         raise NotImplemented("shearLayer not implemented")
+    elif case == 'vehicleTunnel':
+        # Initial conditions for Bunsen Flame
+        rho = 1.18  # Density of air at room temperature
+        u = 0.1
+        v = 0.1
+        T = 298
+        Y = 1
+
+        prim_var[:, :, 0] = rho
+        prim_var[:, :, 1] = 0
+        prim_var[:, :, 2] = 0
+        prim_var[:, :, 4] = refVar['T_ref'] * refVar['rho_ref'] * refVar['P_th'] / (prim_var[:, :, 0] * refVar['p_ref'])
+        prim_var[:, :, 5] = prim_var[:, :, 0] * Y
+
     else:
         raise NotImplemented("Please select the appropriate Initial Model for the problem from the list")
 
-    # Make the input values Numerically divergence free
-    if params['Equation Parameters']['makeDivergenceFree']:
-        prim_var, DivergenceOld, DivergenceNew, _, _, _ = MakeDivFree.makeDivergenceFree(params, numbers_ND,
-                                                                                         coefficient_mats, prim_var)
-        print(np.linalg.norm(DivergenceOld), np.linalg.norm(DivergenceNew))
-        if np.linalg.norm(DivergenceNew) > 1e-12:
-            print("The initial condition did not end up to be divergence free. "
-                  "Please be aware that either there is some inconsistency or the initial density is non-uniform")
-    else:
-        warnings.warn("You have selected the inputs to be not divergence free. Please re-think")
-        exit()
-
     # make the input values non-dimensional
-    prim_var[:, :, 0] = prim_var[:, :, 0] / refVar['rho_ref']  # density
+    prim_var[:, :, 0] = prim_var[:, :, 0] / refVar['rho_ref']  # rho
     prim_var[:, :, 1] = prim_var[:, :, 1] / refVar['u_ref']  # u
     prim_var[:, :, 2] = prim_var[:, :, 2] / refVar['v_ref']  # v
     prim_var[:, :, 3] = prim_var[:, :, 3] / refVar['p_ref']  # p
     prim_var[:, :, 4] = prim_var[:, :, 4] / refVar['T_ref']  # T
+    prim_var[:, :, 5] = prim_var[:, :, 5] / (refVar['mass_frac_ref'] * refVar['rho_ref'])  # rho * Y
 
-    # plt.contourf(grid.X, grid.Y, prim_var[:, :, 3])
+    # Chemistry of the problem. Calculate the reaction rate and store it in prim_var_chemistry
+    Chemistry.CalcReactionRates(prim_var, refVar)
+
+    # Make the input values Numerically divergence free
+    if params['Equation Parameters']['makeDivergenceFree']:
+        prim_var, DivergenceOld, DivergenceNew, _, _, _ = MakeDivFree.makeDivergenceFree(params, numbers_ND,
+                                                                                         coefficient_mats, prim_var,
+                                                                                         refVar, grid)
+        print(np.linalg.norm(DivergenceOld), np.linalg.norm(DivergenceNew))
+        if np.linalg.norm(DivergenceNew) > 1e-12:
+            print("The initial condition did not end up to be divergence free. "
+                  "Please be aware that either there is some inconsistency or the initial density is non-uniform which is ok")
+    else:
+        warnings.warn("You have selected the inputs to be not divergence free. Please re-think")
+        exit()
+
+    # plt.contourf(grid.X, grid.Y, prim_var[:, :, 0])
     # plt.show()
 
     # fig = plt.figure()
@@ -286,12 +318,12 @@ if __name__ == '__main__':
     # ax.set_title('3D contour')
     # plt.show()
 
-    # fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-    # surf = ax.plot_surface(grid.X, grid.Y, prim_var[:, :, 0], cmap=cm.coolwarm, linewidth=0, antialiased=False)
-    # fig.colorbar(surf, shrink=0.5, aspect=5)
-    # plt.show()
-    #
-    # sys.exit()
+    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+    surf = ax.plot_surface(grid.X, grid.Y, prim_var[:, :, 4] * refVar['T_ref'], cmap=cm.coolwarm, linewidth=0, antialiased=False)
+    fig.colorbar(surf, shrink=0.5, aspect=5)
+    plt.show()
+
+    sys.exit()
 
     # Run the solver
     switch = False
@@ -304,4 +336,4 @@ if __name__ == '__main__':
         if result is None:
             print('Solution of the primary variables not computed. Please compute it first')
             exit()
-        plot.plot(params, grid, result, var_name='v', type_plot='Quiver')
+        plot.plot(params, grid, result, var_name='p', type_plot='3D')
